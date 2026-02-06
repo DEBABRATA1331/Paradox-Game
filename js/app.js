@@ -257,6 +257,26 @@ const ParticleSystem = {
 // DOM Elements
 const app = document.getElementById('app');
 
+function renderHomeButton() {
+    // Check if button already exists
+    if (document.getElementById('btn-home')) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'btn-home';
+    btn.innerText = 'HOME';
+    btn.style.position = 'fixed';
+    btn.style.top = '10px';
+    btn.style.left = '10px';
+    btn.style.zIndex = '9999';
+    btn.style.background = '#000';
+    btn.style.border = '1px solid #333';
+    btn.style.color = '#fff';
+    btn.style.padding = '5px 10px';
+    btn.style.cursor = 'pointer';
+    btn.onclick = () => window.location.reload();
+    document.body.appendChild(btn);
+}
+
 // init
 window.addEventListener('click', () => {
     // Audio context must be resumed on user gesture
@@ -274,6 +294,7 @@ window.addEventListener('DOMContentLoaded', () => {
 function initializeGame() {
     // For prototype: We just ask if they are Host or Player
     renderRoleSelection();
+    renderHomeButton();
 }
 
 function renderRoleSelection() {
@@ -300,12 +321,17 @@ function renderRoleSelection() {
 
 function renderHostLobby() {
     Net.init(true, (id) => {
+        // Detect Production vs Local
+        const isProd = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+        const inputStyle = isProd ? 'display:none;' : 'display:block;';
+        const btnText = isProd ? 'SHOW JOIN QR' : 'GENERATE QR';
+
         app.innerHTML = `
             <div class="view active fade-in">
                 <div class="holo-panel" style="width: 800px; height: 600px; display: flex;">
                     <div style="flex: 1; border-right: 1px solid var(--neon-cyan); padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center;">
-                        <input type="text" id="host-ip" placeholder="YOUR LOCAL IP (e.g. 192.168.1.5)" style="background:transparent; border:1px solid #555; color:white; padding:5px; text-align:center; width:100%;">
-                        <button class="btn-sm" onclick="generateQR('${id}')" style="margin-bottom:20px;">GENERATE QR</button>
+                        <input type="text" id="host-ip" placeholder="YOUR LOCAL IP (e.g. 192.168.1.5)" style="background:transparent; border:1px solid #555; color:white; padding:5px; text-align:center; width:100%; margin-bottom: 10px; ${inputStyle}">
+                        <button class="btn-sm" onclick="generateQR('${id}')" style="margin-bottom:20px;">${btnText}</button>
                         <div id="qr-target" style="border: 2px solid var(--neon-cyan); padding: 10px; background:white;"></div>
                         <p style="margin-top: 20px; color: var(--neon-cyan); font-size:0.8rem;">SCAN THIS TO JOIN</p>
                     </div>
@@ -332,8 +358,17 @@ function renderHostLobby() {
     });
 
     window.generateQR = (peerId) => {
-        const ip = document.getElementById('host-ip').value || window.location.hostname;
-        const url = `http://${ip}:8000/?host=${peerId}`;
+        let base = window.location.origin; // Default to current URL (works for Render/Prod)
+
+        // If Localhost and user typed an override IP
+        const manualIp = document.getElementById('host-ip').value;
+        if (manualIp && manualIp.trim() !== '') {
+            base = `http://${manualIp}:8000`;
+        }
+
+        const url = `${base}/?host=${peerId}`;
+        console.log("Generating QR for:", url); // Debug
+
         document.getElementById('qr-target').innerHTML = '';
         new QRCode(document.getElementById('qr-target'), {
             text: url,

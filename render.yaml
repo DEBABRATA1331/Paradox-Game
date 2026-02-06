@@ -1,0 +1,4 @@
+staticSites:
+  - name: qr-shadow-protocol
+    publishPath: .
+    buildCommand: ""
