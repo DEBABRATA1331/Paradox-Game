@@ -591,9 +591,49 @@ function renderHostLobby() {
 
         setTimeout(() => startScenarioPhase(), 5000);
     }
+}
+}
 
-    document.body.classList.remove('red-alert');
-    app.classList.remove('shake');
-    triggerGameEnd('SHADOW');
-}, 3000); // Shadow wins after 3 seconds for demo
+// --- RESTORED PLAYER FUNCTIONS ---
+
+function renderPlayerJoin() {
+    // Check for URL param
+    const urlParams = new URLSearchParams(window.location.search);
+    const hostParam = urlParams.get('host');
+
+    app.innerHTML = `
+        <div class="view active fade-in">
+             <div class="holo-panel">
+                <h2>IDENTIFICATION REQUIRED</h2>
+                <input type="text" id="p-name" placeholder="ENTER CODENAME" style="width: 100%; padding: 15px; margin: 20px 0; background: transparent; border: 1px solid var(--neon-cyan); color: white; font-family: var(--font-mono); font-size: 1.2rem; text-align: center;">
+                ${hostParam ? `<p style="color:var(--neon-green)">TARGET HOST DETECTED</p>` : `<input type="text" id="target-host" placeholder="HOST PEER ID" style="width: 100%; padding: 15px; margin-bottom: 20px; background: transparent; border: 1px solid #555; color: #888;">`}
+                
+                <button class="btn-main" onclick="joinLobby('${hostParam || ''}')">ESTABLISH LINK</button>
+             </div>
+        </div>
+    `;
+
+    window.joinLobby = (preHost) => {
+        const name = document.getElementById('p-name').value;
+        const hostId = preHost || document.getElementById('target-host').value;
+        if (!name || !hostId) return alert("MISSING CREDENTIALS");
+
+        state.playerName = name;
+        Net.init(false, () => {
+            Net.connectToHost(hostId);
+        });
+    };
+}
+
+function renderPlayerLobbyWait() {
+    app.innerHTML = `
+        <div class="view active">
+            <h2 class="glitch" data-text="ACCESS GRANTED">ACCESS GRANTED</h2>
+            <p>AWAITING HOST INITIATION...</p>
+            <div class="loader-bar" style="width: 100px; margin: 20px auto;"><div class="fill" style="animation-duration: 2s; animation-iteration-count:infinite;"></div></div>
+            <button class="btn-sm" style="margin-top:50px" onclick="Audio.init()">INITIALIZE AUDIO SYSTEMS</button>
+            <p style="font-size:0.8rem; color:#666; margin-top:10px;">(REQUIRED FOR COMMS)</p>
+        </div>
+    `;
+    Loc.start();
 }
