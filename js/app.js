@@ -77,6 +77,11 @@ const Net = {
                 };
                 state.players.push(newPlayer);
                 Net.broadcast({ type: 'PLAYER_LIST', players: state.players });
+
+                // **AUTO-START LOGIC**
+                if (state.players.length === 4) {
+                    setTimeout(() => window.startGame(), 2000);
+                }
             }
             else if (data.type === 'GPS') {
                 // Update player location
@@ -97,22 +102,34 @@ const Net = {
         // CLIENT Logic
         if (data.type === 'PLAYER_LIST') {
             state.players = data.players;
-            // Update Lobby UI if open
         }
         else if (data.type === 'GAME_START') {
-            // Find my role
-            const me = state.players.find(p => p.id === state.myId);
-            if (me) {
-                state.role = me.role;
-                triggerRoleReveal();
-            }
+            // NO-OP, handled by Scenario
+        }
+        else if (data.type === 'SCENARIO') {
+            renderPlayerScenario(data.text);
         }
         else if (data.type === 'WIN') {
             triggerGameEnd(data.winner);
         }
+        else if (data.type === 'ROUND_RESULT') {
+            app.innerHTML = `
+                <div class="view active fade-in">
+                    <h1 style="color: var(--neon-cyan);">${data.text}</h1>
+                    <p>NEXT ROUND STARTING...</p>
+                </div>
+            `;
+        }
         else if (data.type === 'ERROR') {
             alert("CONNECTION DENIED: " + data.message);
             window.location.reload();
+        }
+
+        // HOST Logic (if receiving from client)
+        if (state.isHost) {
+            if (data.type === 'VOTE') {
+                processVote(data.target);
+            }
         }
     }
 };
@@ -408,398 +425,175 @@ function renderHostLobby() {
         });
     };
 
-    window.startGame = () => {
-        // Assign Roles
-        state.players.forEach(p => p.role = 'CREW');
-        if (state.players.length > 0) {
-            state.players[Math.floor(Math.random() * state.players.length)].role = 'SHADOW';
-        }
-        Net.broadcast({ type: 'GAME_START' });
-
-        // Host enters game
-        renderHostGame();
-    };
-}
-
-function renderPlayerJoin() {
-    // Check for URL param
-    const urlParams = new URLSearchParams(window.location.search);
-    const hostParam = urlParams.get('host');
-
-    app.innerHTML = `
-        <div class="view active fade-in">
-             <div class="holo-panel">
-                <h2>IDENTIFICATION REQUIRED</h2>
-                <input type="text" id="p-name" placeholder="ENTER CODENAME" style="width: 100%; padding: 15px; margin: 20px 0; background: transparent; border: 1px solid var(--neon-cyan); color: white; font-family: var(--font-mono); font-size: 1.2rem; text-align: center;">
-                ${hostParam ? `<p style="color:var(--neon-green)">TARGET HOST DETECTED</p>` : `<input type="text" id="target-host" placeholder="HOST PEER ID" style="width: 100%; padding: 15px; margin-bottom: 20px; background: transparent; border: 1px solid #555; color: #888;">`}
-                
-                <button class="btn-main" onclick="joinLobby('${hostParam || ''}')">ESTABLISH LINK</button>
-             </div>
-        </div>
-    `;
-
-    window.joinLobby = (preHost) => {
-        const name = document.getElementById('p-name').value;
-        const hostId = preHost || document.getElementById('target-host').value;
-        if (!name || !hostId) return alert("MISSING CREDENTIALS");
-
-        state.playerName = name;
-        Net.init(false, () => {
-            Net.connectToHost(hostId);
-        });
-    };
-}
-
-function renderPlayerLobbyWait() {
-    app.innerHTML = `
-        <div class="view active">
-            <h2 class="glitch" data-text="ACCESS GRANTED">ACCESS GRANTED</h2>
-            <p>AWAITING HOST INITIATION...</p>
-            <div class="loader-bar" style="width: 100px; margin: 20px auto;"><div class="fill" style="animation-duration: 2s; animation-iteration-count:infinite;"></div></div>
-            <button class="btn-sm" style="margin-top:50px" onclick="Audio.init()">INITIALIZE AUDIO SYSTEMS</button>
-            <p style="font-size:0.8rem; color:#666; margin-top:10px;">(REQUIRED FOR COMMS)</p>
-        </div>
-    `;
-    Loc.start();
-}
-
-
-
-// --- GAME LOOP ---
-
-function triggerRoleReveal() {
-    // Random role
-    const isShadow = Math.random() > 0.7;
-    const role = isShadow ? 'SHADOW' : 'CREW';
-    state.role = role;
-    const color = isShadow ? 'var(--alert-red)' : 'var(--neon-green)';
-
-    // Animation
-    app.innerHTML = `<div class="view active bg-reveal" style="background-color: black; z-index: 2000; display: flex; align-items: center; justify-content: center;">
-        <h1 style="font-size: 5rem; color: white;">ANALYZING DNA...</h1>
-    </div>`;
-
-    setTimeout(() => {
-        app.innerHTML = `
-            <div class="view active fade-in" style="${isShadow ? 'box-shadow: inset 0 0 100px rgba(255, 42, 42, 0.4);' : ''}">
-                <h3 style="color: #666; margin-bottom: 20px;">YOUR IDENTITY</h3>
-                <h1 class="glitch" data-text="${role}" style="font-size: 5rem; color: ${color};">${role}</h1>
-                <div class="holo-panel" style="margin-top: 40px; border-color: ${color}; max-width: 500px;">
-                    <p style="font-size: 1.2rem; line-height: 1.5;">
-                        ${isShadow
-                ? 'ELIMINATE THE CREW. DO NOT GET CAUGHT. SABOTAGE THE REACTOR.'
-                : 'REPAIR THE STATION. IDENTIFY THE SHADOWS. SURVIVE.'}
-                    </p>
-                </div>
-                <button class="btn-main" onclick="enterMainGame()">INITIALIZE PROTOCOL</button>
-            </div>
-        `;
-    }, 3000);
-}
-
-window.enterMainGame = () => {
-    if (state.isHost) {
-        renderHostGame();
-    } else {
-        renderPlayerGame();
-    }
-};
-
-// --- HOST GAME View ---
-function renderHostGame() {
-    state.view = 'game';
-    // Simplified Ship Status
-    app.innerHTML = `
-        <div class="view active">
-            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px; width: 90%; height: 80%;">
-                
-                <!-- MAP / STATUS -->
-                <div class="holo-panel">
-                    <h2>STATION STATUS (RADAR)</h2>
-                    <div style="position:relative; width: 100%; height: 300px; margin-bottom: 20px; border: 1px solid var(--neon-cyan); box-shadow: 0 0 15px rgba(0, 243, 255, 0.2);">
-                         <div class="concept-map" style="position:absolute; top:0; left:0; height:100%; width:100%; opacity:0.3; border:none; box-shadow:none;"></div>
-                         <canvas id="radar-canvas" width="600" height="300" style="position:absolute; top:0; left:0; width:100%; height:100%;"></canvas>
-                    </div>
-                    
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                        <div class="status-module">
-                            <h3>O2 LEVELS</h3>
-                            <div class="progress-bar"><div class="fill" style="width: 90%; background: var(--neon-cyan);"></div></div>
-                        </div>
-                        <div class="status-module">
-                            <h3>REACTOR CORE</h3>
-                            <div class="progress-bar"><div class="fill" style="width: 0%; background: var(--neon-green);" id="progress-fill"></div></div>
-                        </div>
-                        <div class="status-module">
-                            <h3>COMMS</h3>
-                            <div class="progress-bar"><div class="fill" style="width: 45%; background: var(--alert-red);"></div></div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- LOGS -->
-                <div class="holo-panel">
-                    <h2>COMM LOGS</h2>
-                    <ul id="game-logs" style="list-style: none; margin-top: 20px; text-align: left; font-size: 0.9rem; color: #aaa;">
-                        <li style="padding: 5px; border-bottom: 1px solid #222;">[SYSTEM] Protocol Initiated...</li>
-                        <li style="padding: 5px; border-bottom: 1px solid #222;">[SYSTEM] 8 Lifeforms Detected...</li>
-                    </ul>
-                    <button class="btn-main" style="margin-top: auto; width: 100%; border-color: var(--alert-red); color: var(--alert-red);" onclick="triggerEmergency()">EMERGENCY MEETING</button>
-                </div>
-            </div>
-        </div>
-    `;
-    updateHostProgress();
-    setTimeout(() => Loc.renderRadar('radar-canvas'), 1000);
-}
-
-window.hostHandleTaskComplete = () => {
-    state.tasksCompleted++;
-    updateHostProgress();
-    // 3 tasks per player to win (or just global 3 for prototype)
-    if (state.tasksCompleted >= 3) {
-        triggerGameEnd('CREW');
-        Net.broadcast({ type: 'WIN', winner: 'CREW' });
-    }
-}
-
-function updateHostProgress() {
-    const total = 3;
-    const current = state.tasksCompleted || 0;
-    const pct = Math.min((current / total) * 100, 100);
-    const fill = document.getElementById('progress-fill');
-    if (fill) fill.style.width = pct + '%';
-}
-
-// --- PLAYER GAME View ---
-function renderPlayerGame() {
-    state.view = 'game';
-    const isShadow = state.role === 'SHADOW';
-
-    // Generate tasks
-    const tasks = [
-        { id: 1, name: 'ALIGN ENGINE OUTPUT', complete: false },
-        { id: 2, name: 'CLEAR O2 FILTERS', complete: false },
-        { id: 3, name: 'CALIBRATE SHIELDS', complete: false }
+    // --- SCENARIO & ELIMINATION LOGIC ---
+    const SCENARIOS = [
+        "OXYGEN LEAK DETECTED. FILTERS SABOTAGED.",
+        "NAVIGATION OFFLINE. WHO ALTERED THE COURSE?",
+        "FOOD SUPPLIES CONTAMINATED. POISON FOUND.",
+        "REACTOR UNSTABLE. COOLANT LINES CUT.",
+        "COMMUNICATIONS JAMMED. UNAUTHORIZED SIGNAL SENT.",
+        "ESCAPE POD LAUNCHED EMPTY. SOMEONE IS HIDING.",
+        "MEDICAL BAY BREACHED. DATA STOLEN.",
+        "SHIELDS LOWERED. WE ARE VULNERABLE."
     ];
 
-    const taskHTML = tasks.map(t => `
-        <div class="task-item" id="task-${t.id}" onclick="openTask(${t.id}, '${t.name}')">
-            <span>${t.name}</span>
-            <span class="status">[PENDING]</span>
-        </div>
-    `).join('');
+    state.votes = {}; // { targetName: count }
+    state.currentScenario = "";
 
-    app.innerHTML = `
-        <div class="view active" style="justify-content: flex-start; padding-top: 40px;">
-            <div style="width: 100%; padding: 0 20px; display: flex; justify-content: space-between; align-items: center;">
-                <h2 style="color: ${isShadow ? 'var(--alert-red)' : 'var(--neon-green)'};">${state.role}</h2>
-                <button class="btn-sm" onclick="triggerEmergency()">REPORT BODY</button>
+    window.startGame = () => {
+        // START GAME
+        Net.broadcast({ type: 'GAME_START' });
+        startScenarioPhase();
+    };
+
+    function startScenarioPhase() {
+        state.view = 'scenario';
+        state.votes = {};
+
+        // Pick Random Scenario
+        const scenario = SCENARIOS[Math.floor(Math.random() * SCENARIOS.length)];
+        state.currentScenario = scenario;
+
+        // Notify All
+        Net.broadcast({ type: 'SCENARIO', text: scenario });
+
+        // Render Host View
+        renderHostScenario(scenario);
+    }
+
+    function renderHostScenario(text) {
+        app.innerHTML = `
+        <div class="view active fade-in" style="border: 4px solid var(--neon-cyan);">
+            <h1 class="glitch" data-text="CRISIS ALERT">CRISIS ALERT</h1>
+            <div class="holo-panel" style="margin: 40px auto; padding: 40px; border-color: var(--alert-red);">
+                <h2 style="font-size: 2rem; color: var(--alert-red);">${text}</h2>
             </div>
-            
-            <div class="holo-panel" style="width: 90%; margin-top: 20px; flex: 1;">
-                <h3>${isShadow ? 'SABOTAGE TARGETS' : 'MISSION TASKS'}</h3>
-                <div class="task-list" style="margin-top: 20px;">
-                    ${taskHTML}
-                </div>
+            <p>WAITING FOR AGENT DELIBERATION...</p>
+            <div id="vote-tally" style="margin-top: 30px;"></div>
+        </div>
+    `;
+    }
+
+    function renderPlayerScenario(text) {
+        app.innerHTML = `
+        <div class="view active fade-in">
+            <h2 style="color: var(--alert-red);">SITUATION REPORT</h2>
+            <div class="holo-panel" style="margin: 20px 0; border-color: var(--alert-red);">
+                <p style="font-size: 1.5rem;">${text}</p>
             </div>
-
-            ${isShadow ? `
-            <div style="width: 90%; margin: 20px 0;">
-                <button class="btn-main" style="width: 100%; border-color: var(--alert-red); color: var(--alert-red);" onclick="triggerSabotage()">ELIMINATE</button>
-            </div>` : ''}
-        </div>
-        
-        <!-- TASK MODAL CONTAINER -->
-        <div id="task-modal" class="modal-overlay"></div>
-    `;
-
-    window.openTask = (id, name) => {
-        const modal = document.getElementById('task-modal');
-        modal.style.display = 'flex';
-        Audio.playBeep();
-
-        let content = '';
-
-        if (id === 1) { // ALIGN ENGINE
-            content = `
-                <div class="holo-panel" style="background: black; width: 90%; max-width: 400px; text-align: center;">
-                    <h3>${name}</h3>
-                    <div style="height: 200px; display: flex; align-items: center; justify-content: center; position: relative; margin: 20px 0; border: 1px dashed #333;">
-                        <div id="target-zone" style="width: 50px; height: 100%; background: rgba(0, 243, 255, 0.2); border-left: 1px solid var(--neon-cyan); border-right: 1px solid var(--neon-cyan); position: absolute;"></div>
-                        <input type="range" min="0" max="100" value="0" id="engine-slider" style="width: 80%; z-index: 10;">
-                    </div>
-                    <p>ALIGN SLIDER TO CENTER</p>
-                    <button class="btn-sm" onclick="closeModal()">EXIT</button>
-                </div>
-            `;
-        } else if (id === 2) { // CLEAR FILTERS
-            content = `
-                <div class="holo-panel" style="background: black; width: 90%; max-width: 400px; text-align: center;">
-                    <h3>${name}</h3>
-                    <div id="o2-game-area" style="height: 200px; position: relative; margin: 20px 0; border: 2px solid #333; overflow: hidden; background: #111;">
-                        <!-- Debris injected here -->
-                    </div>
-                    <p>CLICK TO CLEAR DEBRIS (<span id="debris-count">5</span>)</p>
-                    <button class="btn-sm" onclick="closeModal()">EXIT</button>
-                </div>
-            `;
-            setTimeout(() => startO2Game(id), 100);
-        } else {
-            content = `<div class="holo-panel"><h3>Accessing...</h3></div>`;
-            setTimeout(() => { completeTask(id); closeModal(); }, 1500);
-        }
-
-        modal.innerHTML = content;
-
-        if (id === 1) initEngineSlider(id);
-    };
-
-    function startO2Game(id) {
-        const area = document.getElementById('o2-game-area');
-        if (!area) return;
-        let count = 5;
-        for (let i = 0; i < 5; i++) {
-            const d = document.createElement('div');
-            d.className = 'debris-item';
-            d.style.left = Math.random() * 80 + '%';
-            d.style.top = Math.random() * 80 + '%';
-            d.innerText = 'X';
-            d.onclick = (e) => {
-                e.stopPropagation();
-                d.remove();
-                count--;
-                const countEl = document.getElementById('debris-count');
-                if (countEl) countEl.innerText = count;
-                Audio.playTone(400 + Math.random() * 200, 'square', 0.05);
-                if (count <= 0) {
-                    completeTask(id);
-                    closeModal();
-                }
-            };
-            area.appendChild(d);
-        }
-    }
-
-    function initEngineSlider(id) {
-        const slider = document.getElementById('engine-slider');
-        if (!slider) return;
-        slider.oninput = () => {
-            const val = parseInt(slider.value);
-            Audio.playTone(200 + val * 5, 'sawtooth', 0.1);
-            if (val > 45 && val < 55) {
-                slider.style.accentColor = 'var(--neon-green)';
-                if (!slider.dataset.locked) {
-                    completeTask(id);
-                    slider.dataset.locked = true;
-                    setTimeout(closeModal, 500);
-                }
-            } else {
-                slider.style.accentColor = 'var(--alert-red)';
-            }
-        };
-    }
-
-    window.closeModal = () => {
-        document.getElementById('task-modal').style.display = 'none';
-        Audio.playBeep();
-    };
-
-    window.completeTask = (id) => {
-        const el = document.getElementById(`task-${id}`);
-        if (el && !el.classList.contains('completed')) {
-            el.style.opacity = '0.5';
-            el.querySelector('.status').innerText = '[DONE]';
-            el.classList.add('completed');
-            el.onclick = null;
-            Audio.playTone(800, 'sine', 0.1); // Success ding
-            Audio.playTone(1200, 'sine', 0.4);
-
-            // Win Logic
-            state.tasksCompleted = (state.tasksCompleted || 0) + 1;
-            checkWinCondition();
-        }
-    };
-}
-
-function checkWinCondition() {
-    const totalTasks = 3; // Hardcoded for prototype
-    if ((state.tasksCompleted || 0) >= totalTasks) {
-        setTimeout(() => triggerGameEnd('CREW'), 1000);
-    }
-}
-
-window.triggerGameEnd = (winner) => {
-    state.view = 'end';
-    const isCrew = winner === 'CREW';
-    const color = isCrew ? 'var(--neon-green)' : 'var(--alert-red)';
-    const text = isCrew ? 'MISSION ACCOMPLISHED' : 'CRITICAL FAILURE';
-    const subtext = isCrew ? 'STATION STABILIZED' : 'SYSTEMS OFFLINE';
-
-    app.innerHTML = `
-        <div class="view active fade-in" style="background: ${isCrew ? '#051005' : '#100505'};">
-            <h1 class="glitch" data-text="${text}" style="font-size: 4rem; color: ${color};">${text}</h1>
-            <p style="margin-top: 20px; font-size: 1.5rem;">${subtext}</p>
-            <button class="btn-main" onclick="location.reload()" style="margin-top: 50px; border-color: ${color}; color: ${color};">REBOOT SYSTEM</button>
+            <p>WHO IS RESPONSIBLE?</p>
+            <button class="btn-main" onclick="renderVotingScreen()" style="margin-top: 30px;">CAST VOTE</button>
         </div>
     `;
-    if (!isCrew) Audio.playAlarm();
-}
+        Audio.playAlarm();
+    }
 
+    window.renderVotingScreen = () => {
+        const alivePlayers = state.players.filter(p => p.alive && p.id !== state.myId);
 
-window.triggerEmergency = () => {
-    Audio.playAlarm();
-    app.innerHTML = `
-        <div class="view active" style="background: var(--alert-red);">
-            <h1 class="glitch" data-text="EMERGENCY MEETING" style="font-size: 4rem; color: black; text-shadow: none;">EMERGENCY MEETING</h1>
-        </div>
-    `;
-    setTimeout(() => {
-        state.view = 'vote';
-        renderVotingScreen();
-    }, 3000);
-}
+        // If I am dead, show dead screen
+        // TODO: Need strict dead check logic later
 
-function renderVotingScreen() {
-    const players = ['CMDR. SHEPARD', 'AGENT 47', 'EZIO', 'GORDON', 'CHELL'];
-    const playerButtons = players.map(p => `
-        <button class="vote-btn" onclick="castVote('${p}')">
-            ${p}
+        const btns = alivePlayers.map(p => `
+        <button class="vote-btn" onclick="castVote('${p.name}')" style="border-color:${p.color}; color:${p.color};">
+            ${p.name}
         </button>
     `).join('');
 
-    app.innerHTML = `
-        <div class="view active">
-            <h2>WHO IS THE SHADOW?</h2>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 30px; width: 90%;">
-                ${playerButtons}
+        app.innerHTML = `
+        <div class="view active fade-in">
+            <h2>SELECT TARGET</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 30px;">
+                ${btns}
                 <button class="vote-btn" onclick="castVote('SKIP')" style="grid-column: span 2; border-color: #666; color: #aaa;">SKIP VOTE</button>
             </div>
         </div>
     `;
-}
+    };
 
-window.castVote = (target) => {
-    app.innerHTML = `
-        <div class="view active">
-            <h2>VOTE RECORDED</h2>
-            <h1 style="color: var(--neon-cyan);">${target}</h1>
-            <p>WAITING FOR RESULTS...</p>
+    window.castVote = (target) => {
+        // Send Vote to Host
+        if (state.conn) {
+            state.conn.send({ type: 'VOTE', target: target });
+        }
+
+        app.innerHTML = `
+        <div class="view active fade-in">
+            <h2>VOTE TRANSMITTED</h2>
+            <h1 style="color: var(--neon-cyan); margin: 40px 0;">${target}</h1>
+            <p>AWAITING CONSENSUS...</p>
+            <div class="loader-bar" style="width: 200px; margin: 20px auto;"><div class="fill" style="width: 100%; animation: none; background: #333;"></div></div>
         </div>
     `;
-}
+    };
 
+    // --- ELIMINATION LOGIC (HOST) ---
+    function processVote(target) {
+        state.votes[target] = (state.votes[target] || 0) + 1;
 
-window.triggerSabotage = () => {
-    // Effect
-    document.body.classList.add('red-alert');
-    app.classList.add('shake');
-    Audio.playAlarm();
+        // Update Host UI Tally
+        const tallyEl = document.getElementById('vote-tally');
+        if (tallyEl) {
+            tallyEl.innerHTML = Object.entries(state.votes).map(([k, v]) => `<div>${k}: ${v}</div>`).join('');
+        }
 
-    // Simulate O2 Depletion leading to loss
-    setTimeout(() => {
-        document.body.classList.remove('red-alert');
-        app.classList.remove('shake');
-        triggerGameEnd('SHADOW');
-    }, 3000); // Shadow wins after 3 seconds for demo
+        // Check if everyone voted
+        const livingCount = state.players.filter(p => p.alive).length;
+        const votesCast = Object.values(state.votes).reduce((a, b) => a + b, 0);
+
+        if (votesCast >= livingCount) {
+            resolveRound();
+        }
+    }
+
+    function resolveRound() {
+        // Find Max
+        let maxVotes = 0;
+        let eliminated = null;
+
+        // Simple Majority
+        for (const [name, count] of Object.entries(state.votes)) {
+            if (count > maxVotes) {
+                maxVotes = count;
+                eliminated = name;
+            } else if (count === maxVotes) {
+                eliminated = 'TIE'; // No one dies on tie
+            }
+        }
+
+        let resultMsg = "NO CONSENSUS REACHED.";
+
+        if (eliminated && eliminated !== 'TIE' && eliminated !== 'SKIP') {
+            const p = state.players.find(x => x.name === eliminated);
+            if (p) {
+                p.alive = false;
+                resultMsg = `${p.name} WAS EJECTED.`;
+                // Check Win (e.g. 1 Survivor)
+                const survivors = state.players.filter(x => x.alive).length;
+                if (survivors <= 1) {
+                    Net.broadcast({ type: 'WIN', winner: state.players.find(x => x.alive).name + " WINS!" });
+                    triggerGameEnd(state.players.find(x => x.alive).name);
+                    return;
+                }
+            }
+        }
+
+        // Broadcast Result
+        Net.broadcast({ type: 'ROUND_RESULT', text: resultMsg });
+
+        // Show Result on Host
+        app.innerHTML = `
+        <div class="view active fade-in">
+            <h1 style="font-size: 3rem; color: var(--neon-cyan);">${resultMsg}</h1>
+            <p>NEXT CRISIS IMMINENT...</p>
+        </div>
+    `;
+
+        setTimeout(() => startScenarioPhase(), 5000);
+    }
+
+    document.body.classList.remove('red-alert');
+    app.classList.remove('shake');
+    triggerGameEnd('SHADOW');
+}, 3000); // Shadow wins after 3 seconds for demo
 }
