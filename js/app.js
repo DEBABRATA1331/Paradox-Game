@@ -405,193 +405,196 @@ function renderHostLobby() {
         }, 1000);
     });
 
-    window.generateQR = (peerId) => {
-        let base = window.location.origin; // Default to current URL (works for Render/Prod)
+}
 
-        // If Localhost and user typed an override IP
-        const manualIp = document.getElementById('host-ip').value;
-        if (manualIp && manualIp.trim() !== '') {
-            base = `http://${manualIp}:8000`;
-        }
+window.generateQR = (peerId) => {
+    let base = window.location.origin; // Default to current URL (works for Render/Prod)
 
-        const url = `${base}/?host=${peerId}`;
-        console.log("Generating QR for:", url); // Debug
-
-        document.getElementById('qr-target').innerHTML = '';
-        new QRCode(document.getElementById('qr-target'), {
-            text: url,
-            width: 200,
-            height: 200
-        });
-    };
-
-    // --- SCENARIO & ELIMINATION LOGIC ---
-    const SCENARIOS = [
-        "OXYGEN LEAK DETECTED. FILTERS SABOTAGED.",
-        "NAVIGATION OFFLINE. WHO ALTERED THE COURSE?",
-        "FOOD SUPPLIES CONTAMINATED. POISON FOUND.",
-        "REACTOR UNSTABLE. COOLANT LINES CUT.",
-        "COMMUNICATIONS JAMMED. UNAUTHORIZED SIGNAL SENT.",
-        "ESCAPE POD LAUNCHED EMPTY. SOMEONE IS HIDING.",
-        "MEDICAL BAY BREACHED. DATA STOLEN.",
-        "SHIELDS LOWERED. WE ARE VULNERABLE."
-    ];
-
-    state.votes = {}; // { targetName: count }
-    state.currentScenario = "";
-
-    window.startGame = () => {
-        // START GAME
-        Net.broadcast({ type: 'GAME_START' });
-        startScenarioPhase();
-    };
-
-    function startScenarioPhase() {
-        state.view = 'scenario';
-        state.votes = {};
-
-        // Pick Random Scenario
-        const scenario = SCENARIOS[Math.floor(Math.random() * SCENARIOS.length)];
-        state.currentScenario = scenario;
-
-        // Notify All
-        Net.broadcast({ type: 'SCENARIO', text: scenario });
-
-        // Render Host View
-        renderHostScenario(scenario);
+    // If Localhost and user typed an override IP
+    const manualIp = document.getElementById('host-ip').value;
+    if (manualIp && manualIp.trim() !== '') {
+        base = `http://${manualIp}:8000`;
     }
 
-    function renderHostScenario(text) {
-        app.innerHTML = `
-        <div class="view active fade-in" style="border: 4px solid var(--neon-cyan);">
-            <h1 class="glitch" data-text="CRISIS ALERT">CRISIS ALERT</h1>
-            <div class="holo-panel" style="margin: 40px auto; padding: 40px; border-color: var(--alert-red);">
-                <h2 style="font-size: 2rem; color: var(--alert-red);">${text}</h2>
-            </div>
-            <p>WAITING FOR AGENT DELIBERATION...</p>
-            <div id="vote-tally" style="margin-top: 30px;"></div>
+    const url = `${base}/?host=${peerId}`;
+    console.log("Generating QR for:", url); // Debug
+
+    document.getElementById('qr-target').innerHTML = '';
+    new QRCode(document.getElementById('qr-target'), {
+        text: url,
+        width: 200,
+        height: 200
+    });
+};
+
+
+// --- SCENARIO & ELIMINATION LOGIC ---
+const SCENARIOS = [
+    "OXYGEN LEAK DETECTED. FILTERS SABOTAGED.",
+    "NAVIGATION OFFLINE. WHO ALTERED THE COURSE?",
+    "FOOD SUPPLIES CONTAMINATED. POISON FOUND.",
+    "REACTOR UNSTABLE. COOLANT LINES CUT.",
+    "COMMUNICATIONS JAMMED. UNAUTHORIZED SIGNAL SENT.",
+    "ESCAPE POD LAUNCHED EMPTY. SOMEONE IS HIDING.",
+    "MEDICAL BAY BREACHED. DATA STOLEN.",
+    "SHIELDS LOWERED. WE ARE VULNERABLE."
+];
+
+state.votes = {}; // { targetName: count }
+state.currentScenario = "";
+
+window.startGame = () => {
+    // START GAME
+    Net.broadcast({ type: 'GAME_START' });
+    startScenarioPhase();
+};
+
+function startScenarioPhase() {
+    state.view = 'scenario';
+    state.votes = {};
+
+    // Pick Random Scenario
+    const scenario = SCENARIOS[Math.floor(Math.random() * SCENARIOS.length)];
+    state.currentScenario = scenario;
+
+    // Notify All
+    Net.broadcast({ type: 'SCENARIO', text: scenario });
+
+    // Render Host View
+    renderHostScenario(scenario);
+}
+
+function renderHostScenario(text) {
+    app.innerHTML = `
+    <div class="view active fade-in" style="border: 4px solid var(--neon-cyan);">
+        <h1 class="glitch" data-text="CRISIS ALERT">CRISIS ALERT</h1>
+        <div class="holo-panel" style="margin: 40px auto; padding: 40px; border-color: var(--alert-red);">
+            <h2 style="font-size: 2rem; color: var(--alert-red);">${text}</h2>
         </div>
-    `;
+        <p>WAITING FOR AGENT DELIBERATION...</p>
+        <div id="vote-tally" style="margin-top: 30px;"></div>
+    </div>
+`;
+}
+
+// MADE GLOBAL SO NET.HANDLEDATA CAN SEE IT
+window.renderPlayerScenario = (text) => {
+    app.innerHTML = `
+    <div class="view active fade-in">
+        <h2 style="color: var(--alert-red);">SITUATION REPORT</h2>
+        <div class="holo-panel" style="margin: 20px 0; border-color: var(--alert-red);">
+            <p style="font-size: 1.5rem;">${text}</p>
+        </div>
+        <p>WHO IS RESPONSIBLE?</p>
+        <button class="btn-main" onclick="renderVotingScreen()" style="margin-top: 30px;">CAST VOTE</button>
+    </div>
+`;
+    Audio.playAlarm();
+}
+
+window.renderVotingScreen = () => {
+    const alivePlayers = state.players.filter(p => p.alive && p.id !== state.myId);
+
+    // If I am dead, show dead screen
+    // TODO: Need strict dead check logic later
+
+    const btns = alivePlayers.map(p => `
+    <button class="vote-btn" onclick="castVote('${p.name}')" style="border-color:${p.color}; color:${p.color};">
+        ${p.name}
+    </button>
+`).join('');
+
+    app.innerHTML = `
+    <div class="view active fade-in">
+        <h2>SELECT TARGET</h2>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 30px;">
+            ${btns}
+            <button class="vote-btn" onclick="castVote('SKIP')" style="grid-column: span 2; border-color: #666; color: #aaa;">SKIP VOTE</button>
+        </div>
+    </div>
+`;
+};
+
+window.castVote = (target) => {
+    // Send Vote to Host
+    if (state.conn) {
+        state.conn.send({ type: 'VOTE', target: target });
     }
 
-    function renderPlayerScenario(text) {
-        app.innerHTML = `
-        <div class="view active fade-in">
-            <h2 style="color: var(--alert-red);">SITUATION REPORT</h2>
-            <div class="holo-panel" style="margin: 20px 0; border-color: var(--alert-red);">
-                <p style="font-size: 1.5rem;">${text}</p>
-            </div>
-            <p>WHO IS RESPONSIBLE?</p>
-            <button class="btn-main" onclick="renderVotingScreen()" style="margin-top: 30px;">CAST VOTE</button>
-        </div>
-    `;
-        Audio.playAlarm();
+    app.innerHTML = `
+    <div class="view active fade-in">
+        <h2>VOTE TRANSMITTED</h2>
+        <h1 style="color: var(--neon-cyan); margin: 40px 0;">${target}</h1>
+        <p>AWAITING CONSENSUS...</p>
+        <div class="loader-bar" style="width: 200px; margin: 20px auto;"><div class="fill" style="width: 100%; animation: none; background: #333;"></div></div>
+    </div>
+`;
+};
+
+// --- ELIMINATION LOGIC (HOST) ---
+// MADE GLOBAL
+window.processVote = (target) => {
+    state.votes[target] = (state.votes[target] || 0) + 1;
+
+    // Update Host UI Tally
+    const tallyEl = document.getElementById('vote-tally');
+    if (tallyEl) {
+        tallyEl.innerHTML = Object.entries(state.votes).map(([k, v]) => `<div>${k}: ${v}</div>`).join('');
     }
 
-    window.renderVotingScreen = () => {
-        const alivePlayers = state.players.filter(p => p.alive && p.id !== state.myId);
+    // Check if everyone voted
+    const livingCount = state.players.filter(p => p.alive).length;
+    const votesCast = Object.values(state.votes).reduce((a, b) => a + b, 0);
 
-        // If I am dead, show dead screen
-        // TODO: Need strict dead check logic later
-
-        const btns = alivePlayers.map(p => `
-        <button class="vote-btn" onclick="castVote('${p.name}')" style="border-color:${p.color}; color:${p.color};">
-            ${p.name}
-        </button>
-    `).join('');
-
-        app.innerHTML = `
-        <div class="view active fade-in">
-            <h2>SELECT TARGET</h2>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 30px;">
-                ${btns}
-                <button class="vote-btn" onclick="castVote('SKIP')" style="grid-column: span 2; border-color: #666; color: #aaa;">SKIP VOTE</button>
-            </div>
-        </div>
-    `;
-    };
-
-    window.castVote = (target) => {
-        // Send Vote to Host
-        if (state.conn) {
-            state.conn.send({ type: 'VOTE', target: target });
-        }
-
-        app.innerHTML = `
-        <div class="view active fade-in">
-            <h2>VOTE TRANSMITTED</h2>
-            <h1 style="color: var(--neon-cyan); margin: 40px 0;">${target}</h1>
-            <p>AWAITING CONSENSUS...</p>
-            <div class="loader-bar" style="width: 200px; margin: 20px auto;"><div class="fill" style="width: 100%; animation: none; background: #333;"></div></div>
-        </div>
-    `;
-    };
-
-    // --- ELIMINATION LOGIC (HOST) ---
-    function processVote(target) {
-        state.votes[target] = (state.votes[target] || 0) + 1;
-
-        // Update Host UI Tally
-        const tallyEl = document.getElementById('vote-tally');
-        if (tallyEl) {
-            tallyEl.innerHTML = Object.entries(state.votes).map(([k, v]) => `<div>${k}: ${v}</div>`).join('');
-        }
-
-        // Check if everyone voted
-        const livingCount = state.players.filter(p => p.alive).length;
-        const votesCast = Object.values(state.votes).reduce((a, b) => a + b, 0);
-
-        if (votesCast >= livingCount) {
-            resolveRound();
-        }
-    }
-
-    function resolveRound() {
-        // Find Max
-        let maxVotes = 0;
-        let eliminated = null;
-
-        // Simple Majority
-        for (const [name, count] of Object.entries(state.votes)) {
-            if (count > maxVotes) {
-                maxVotes = count;
-                eliminated = name;
-            } else if (count === maxVotes) {
-                eliminated = 'TIE'; // No one dies on tie
-            }
-        }
-
-        let resultMsg = "NO CONSENSUS REACHED.";
-
-        if (eliminated && eliminated !== 'TIE' && eliminated !== 'SKIP') {
-            const p = state.players.find(x => x.name === eliminated);
-            if (p) {
-                p.alive = false;
-                resultMsg = `${p.name} WAS EJECTED.`;
-                // Check Win (e.g. 1 Survivor)
-                const survivors = state.players.filter(x => x.alive).length;
-                if (survivors <= 1) {
-                    Net.broadcast({ type: 'WIN', winner: state.players.find(x => x.alive).name + " WINS!" });
-                    triggerGameEnd(state.players.find(x => x.alive).name);
-                    return;
-                }
-            }
-        }
-
-        // Broadcast Result
-        Net.broadcast({ type: 'ROUND_RESULT', text: resultMsg });
-
-        // Show Result on Host
-        app.innerHTML = `
-        <div class="view active fade-in">
-            <h1 style="font-size: 3rem; color: var(--neon-cyan);">${resultMsg}</h1>
-            <p>NEXT CRISIS IMMINENT...</p>
-        </div>
-    `;
-
-        setTimeout(() => startScenarioPhase(), 5000);
+    if (votesCast >= livingCount) {
+        resolveRound();
     }
 }
+
+function resolveRound() {
+    // Find Max
+    let maxVotes = 0;
+    let eliminated = null;
+
+    // Simple Majority
+    for (const [name, count] of Object.entries(state.votes)) {
+        if (count > maxVotes) {
+            maxVotes = count;
+            eliminated = name;
+        } else if (count === maxVotes) {
+            eliminated = 'TIE'; // No one dies on tie
+        }
+    }
+
+    let resultMsg = "NO CONSENSUS REACHED.";
+
+    if (eliminated && eliminated !== 'TIE' && eliminated !== 'SKIP') {
+        const p = state.players.find(x => x.name === eliminated);
+        if (p) {
+            p.alive = false;
+            resultMsg = `${p.name} WAS EJECTED.`;
+            // Check Win (e.g. 1 Survivor)
+            const survivors = state.players.filter(x => x.alive).length;
+            if (survivors <= 1) {
+                Net.broadcast({ type: 'WIN', winner: state.players.find(x => x.alive).name + " WINS!" });
+                triggerGameEnd(state.players.find(x => x.alive).name);
+                return;
+            }
+        }
+    }
+
+    // Broadcast Result
+    Net.broadcast({ type: 'ROUND_RESULT', text: resultMsg });
+
+    // Show Result on Host
+    app.innerHTML = `
+    <div class="view active fade-in">
+        <h1 style="font-size: 3rem; color: var(--neon-cyan);">${resultMsg}</h1>
+        <p>NEXT CRISIS IMMINENT...</p>
+    </div>
+`;
+
+    setTimeout(() => startScenarioPhase(), 5000);
 }
 
 // --- RESTORED PLAYER FUNCTIONS ---
