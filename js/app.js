@@ -50,16 +50,30 @@ const Net = {
         conn.on('error', (err) => alert("Connection Error: " + err));
     },
     handleIncomingConnection: (conn) => {
+        // Enforce 8 Player Limit
+        if (state.players.length >= 8) {
+            conn.on('open', () => {
+                conn.send({ type: 'ERROR', message: 'ROOM FULL' });
+                setTimeout(() => conn.close(), 500);
+            });
+            return;
+        }
+
         state.connections.push(conn);
         conn.on('data', (data) => {
             // RELAY or PROCESS
             if (data.type === 'JOIN') {
+                // Auto-assign Color
+                const colors = ['#FF0000', '#00FF00', '#0088FF', '#FFFF00', '#00FFFF', '#FF00FF', '#FFA500', '#FFFFFF'];
+                const color = colors[state.players.length % colors.length];
+
                 const newPlayer = {
                     id: conn.peer,
                     name: data.name,
                     role: null,
                     alive: true,
-                    lat: 0, lng: 0
+                    lat: 0, lng: 0,
+                    color: color
                 };
                 state.players.push(newPlayer);
                 Net.broadcast({ type: 'PLAYER_LIST', players: state.players });
@@ -95,6 +109,10 @@ const Net = {
         }
         else if (data.type === 'WIN') {
             triggerGameEnd(data.winner);
+        }
+        else if (data.type === 'ERROR') {
+            alert("CONNECTION DENIED: " + data.message);
+            window.location.reload();
         }
     }
 };
@@ -141,11 +159,21 @@ const Loc = {
                 let x = c.width / 2 + (p.lng || (Math.cos(i) * 50));
                 let y = c.height / 2 + (p.lat || (Math.sin(i) * 50));
 
-                ctx.fillStyle = p.role === 'SHADOW' && state.isHost ? 'var(--alert-red)' : 'var(--neon-green)';
+                ctx.fillStyle = p.color || '#fff';
                 ctx.beginPath();
-                ctx.arc(x, y, 5, 0, Math.PI * 2);
+                ctx.arc(x, y, 8, 0, Math.PI * 2);
                 ctx.fill();
-                ctx.fillText(p.name, x + 10, y);
+
+                // Host sees Shadows marked
+                if (p.role === 'SHADOW' && state.isHost) {
+                    ctx.strokeStyle = 'red';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+
+                ctx.fillStyle = '#fff';
+                ctx.font = '10px monospace';
+                ctx.fillText(p.name, x + 12, y);
             });
             requestAnimationFrame(draw);
         };
@@ -351,7 +379,10 @@ function renderHostLobby() {
             const list = document.getElementById('player-list');
             if (list) {
                 list.innerHTML = state.players.map(p =>
-                    `<li style="padding: 10px; border-bottom: 1px solid #333; color: var(--neon-green);"> > ${p.name.toUpperCase()} [ONLINE]</li>`
+                    `<li style="padding: 10px; border-bottom: 1px solid #333; color: ${p.color || 'var(--neon-green)'}; display:flex; align-items:center;">
+                        <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${p.color || '#fff'}; margin-right:10px;"></span> 
+                        > ${p.name.toUpperCase()} [ONLINE]
+                     </li>`
                 ).join('');
             }
         }, 1000);
